@@ -1,0 +1,853 @@
+---
+title: "tvr_shock"
+author: "Matthew Lawlor"
+date: "1/19/21"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+```
+
+```{r}
+ttvi_trials = read.csv("../Data/For analysis/TVR_shock_manuscript_analysis_trials_4_15_21.csv") %>%
+  janitor::clean_names() %>% 
+  group_by(trial) %>% 
+  summarize(
+    n = n()
+  ) %>% 
+  knitr::kable()
+
+ttvi_trials
+```
+
+## Read and clean
+```{r, warning=FALSE, message=FALSE}
+tvr_df = read.csv("../Data/For analysis/TVR_shock_manuscript_analysis_trials_4_15_21.csv") %>%
+  janitor::clean_names() %>% 
+  select(trial, scai_shock, age, nyha, hfh, cirrhosis, re_op, esrd, na, creat, t_bili, inr, cvp, paps, papd, papm, pcwp, fick_ci, pvr, cvp_pcwp, papi, lved, lvef, rv_size, rv_base, rv_mid, rv_function, tapse, rv_sprime, rv_fac, rv_dp_dt, tricuspid_regurg, vc_max, pasp, sprime_paps, sprime_pasp, tapse_paps, tapse_pasp, proc_type, valve_type, ecmo_admission, ecmo_24, inhosp_mortality, diastolic_stroke_volume, biplane_reg_vol, residual_tr, proc_date, sts_replacement, sts_repair, euroscore, post_hr, post_sbp, post_map, creat_initial, creat_peak, lactate_initial, lactate_peak, xclamp_time) %>%
+  mutate(
+    severe_shock = if_else(scai_shock > 3, 1, 0),
+    nyha = if_else(nyha > 2, 1, 0),
+    tricuspid_regurg = as.numeric(tricuspid_regurg),
+    tr_binary = if_else(tricuspid_regurg > 4, 1, 0),
+    rv_base = as.numeric(rv_base),
+    rv_mid = as.numeric(rv_mid),
+    pasp = as.numeric(pasp),
+    tapse_paps = as.numeric(tapse_paps),
+    tapse_pasp = as.numeric(tapse_pasp),
+    sprime_paps = as.numeric(sprime_paps),
+    sprime_pasp = as.numeric(sprime_pasp),
+    cvp = as.numeric(cvp),
+    pcwp = as.numeric(pcwp),
+    fick_ci = as.numeric(fick_ci),
+    pvr = as.numeric(pvr),
+    lved = as.numeric(lved),
+    lvef = as.numeric(lvef),
+    paps = as.numeric(paps),
+    papm = as.numeric(papm),
+    papd = as.numeric(papd),
+    tpg = papm - pcwp,
+    sprime = as.numeric(rv_sprime),
+    tapse = as.numeric(tapse),
+    rv_fac = as.numeric(rv_fac),
+    rv_dp_dt = as.numeric(rv_dp_dt),
+    cvp_pcwp = as.numeric(cvp_pcwp),
+    papi = as.numeric(papi),
+    vc_max = as.numeric(vc_max),
+    rv_size = as.numeric(rv_size),
+    rv_size = if_else(rv_size >= 3, 1, 0),
+    rv_function = as.numeric(rv_function),
+    rv_function = if_else(rv_function >= 3, 1, 0),
+    inhosp_mortality = as.factor(inhosp_mortality),
+    ecmo = if_else(ecmo_admission > 0|ecmo_24 > 0, 1, 0),
+    na = as.numeric(na),
+    creat = as.numeric(creat),
+    t_bili = as.numeric(t_bili),
+    inr = as.numeric(inr),
+    esrd = as.numeric(esrd),
+    meld = transplantr::meld_US(INR = inr, bili = t_bili, creat = creat, dialysis = esrd),
+    meld_na = transplantr::meld_na_US(INR = inr, bili = t_bili, creat = creat, Na = na, dialysis = esrd),
+    biplane_reg_vol = as.numeric(biplane_reg_vol),
+    diastolic_stroke_volume = as.numeric(diastolic_stroke_volume),
+    reg_frac = biplane_reg_vol / diastolic_stroke_volume,
+    tapse_pasp_c = tapse_pasp/reg_frac,
+    tapse_paps_c = tapse_paps/reg_frac,
+    sprime_pasp_c = sprime_pasp/reg_frac,
+    sprime_paps_c = sprime_paps/reg_frac,
+    residual_tr = if_else(residual_tr > 1, 1, 0, 0),
+    proc_date = as.Date(proc_date, "%m/%d/%y"), 
+    year = format(proc_date, "%Y"), 
+    sts_replacement = as.numeric(sts_replacement),
+    sts_repair = as.numeric(sts_repair),
+    euroscore = as.numeric(euroscore), 
+    post_hr = as.numeric(post_hr),
+    post_sbp = as.numeric(post_sbp),
+    post_map = as.numeric(post_map),
+    creat_initial = as.numeric(creat_initial),
+    creat_peak = as.numeric(creat_peak),
+    delta_creat = creat_peak - creat_initial,
+    lactate_initial = as.numeric(lactate_initial),
+    lactate_peak = as.numeric(lactate_peak),
+    xclamp_time = as.numeric(xclamp_time),
+    xclamp = if_else(xclamp_time>0, 1, 0, 0)
+  ) %>% 
+  select(-rv_sprime) %>% 
+  filter(trial != "TRILUMINATE")
+```
+
+```{r, eval=FALSE, include=FALSE}
+#test normality
+shapiro.test(tvr_df$meld)
+
+#testing continuous data, normal distribution
+tvr_df %>%  
+  group_by(proc_type) %>% 
+  summarize(
+    mean_tapse_paps = mean(tapse_paps, na.rm = TRUE),
+    sd_tapse_paps = sd(tapse_paps, na.rm = TRUE)
+  )
+
+#testing continuous data, nonparametric
+tvr_df %>% 
+  group_by(cirrhosis) %>% 
+  summarize(
+    median = median(meld, na.rm = TRUE),
+    q1 = quantile(meld, probs = 0.25, na.rm = TRUE),
+    q3 = quantile(meld, probs = 0.75, na.rm = TRUE)
+  ) %>% 
+  knitr::kable()
+
+tvr_df %>% 
+  #filter(proc_type == 1) %>% 
+  select(tapse_paps) %>% 
+  summary()
+
+wilcox.test(formula = tapse_pasp~proc_type, data = tvr_df) %>% 
+  broom::glance()
+
+t.test(tapse_paps ~ proc_type, data=tvr_df, var.equal=FALSE) %>% 
+  broom::glance()
+
+tvr_df %>%  #testing proportional data
+  group_by(proc_type, ecmo) %>% 
+  summarise (n = n()) %>%
+  mutate(freq = n / sum(n)) %>% 
+  knitr::kable()
+
+tvr_df %>%  
+  summarise(pval = chisq.test(proc_type, ecmo)$p.value) %>% 
+  knitr::kable()
+
+tvr_df %>%
+  group_by(proc_type, residual_tr) %>% 
+  summarise (n = n()) %>%
+  mutate(freq = n / sum(n)) %>% 
+  knitr::kable()
+
+tvr_df %>%  
+  summarise(pval = chisq.test(proc_type, residual_tr)$p.value) %>% 
+  knitr::kable()
+
+tvr_df %>%
+  mutate(
+    tapse_group = if_else(tapse > 17, 1, 0)
+  ) %>% 
+  group_by(tapse_group) %>% 
+  summarize(
+    n = n(),
+  )
+
+tvr_df$tapse %>% 
+  summary()
+
+tvr_df %>%
+  mutate(
+    sprime_group = if_else(sprime > 9.5, 1, 0)
+  ) %>% 
+  group_by(sprime_group) %>% 
+  summarize(
+    n = n(),
+  )
+
+tvr_df$sprime %>% 
+  summary()
+
+tvr_df %>%
+  group_by(rv_function) %>% 
+  summarize(
+    n = n(),
+  ) %>% 
+  mutate(freq = n / sum(n)) %>% 
+  knitr::kable()
+
+tvr_df %>%
+  group_by(proc_type, rv_function) %>% 
+  summarize(
+    n = n(),
+  ) %>% 
+  mutate(freq = n / sum(n)) %>% 
+  knitr::kable()
+
+tvr_df %>%  
+  summarise(pval = chisq.test(proc_type, rv_function)$p.value) %>% 
+  knitr::kable()
+
+tvr_df %>%  
+  summarise(pval = fisher.test(proc_type, ecmo)$p.value) %>% 
+  knitr::kable()
+```
+
+```{r}
+##surgical scores
+tvr_df %>% 
+  
+  ggplot(aes(x = sts_replacement)) + 
+  geom_histogram()
+
+tvr_df %>% 
+  mutate(
+    proc_type = as.factor(proc_type)
+  ) %>% 
+  ggplot(aes(x = proc_type, y = sts_replacement)) +
+  geom_boxplot()
+
+tvr_df %>% ##test normality (Shapiro-Wilk)
+  select(sts_replacement, sts_repair, euroscore) %>% 
+  map(~shapiro.test(.x)) %>% 
+  map(broom::glance) %>% 
+  map_dfr(~ .x %>% as_tibble(), .id = "name") %>% 
+  select(name, p.value) %>% 
+  filter(name != "tr_cat") %>% 
+  knitr::kable()
+
+tvr_df %>% 
+  select(proc_type, sts_replacement, sts_repair, euroscore) %>% 
+  #group_by(proc_type) %>% 
+  summarize(across(sts_replacement:euroscore, list(median = ~ median(.x, na.rm = TRUE), Q1=~quantile(.x, probs = 0.25, na.rm = TRUE), Q3=~quantile(.x, probs = 0.75, na.rm = TRUE)))) %>% 
+  pander::pandoc.table(style = "grid", caption = "Risk scores by procedure type, nonparametric")
+
+tvr_df %>% ##univariable analysis wilcox
+  select(proc_type, sts_replacement, sts_repair, euroscore) %>% 
+  map(~wilcox.test(.x ~ tvr_df$proc_type, data = tvr_df)) %>% 
+  map(broom::glance) %>% 
+  map_dfr(~ .x %>% as_tibble(), .id = "name") %>% 
+  select(name, p.value) %>% 
+  filter(name != "proc_type") %>% 
+  knitr::kable()
+
+```
+
+```{r}
+#shock parameters
+tvr_df %>% ##test normality (Shapiro-Wilk)
+  select(post_hr, post_sbp, post_map, creat_initial, creat_peak, lactate_initial, lactate_peak) %>% 
+  map(~shapiro.test(.x)) %>% 
+  map(broom::glance) %>% 
+  map_dfr(~ .x %>% as_tibble(), .id = "name") %>% 
+  select(name, p.value) %>% 
+  knitr::kable()
+
+tvr_df %>% 
+  select(proc_type, post_hr) %>% 
+  group_by(proc_type) %>% 
+  summarize(across(post_hr, list(mean = ~ mean(.x, na.rm = TRUE), sd = ~ sd(.x, na.rm = TRUE)))) %>%
+  pander::pandoc.table(style = "grid", caption = "Shock parameters, parametric")
+
+tvr_df %>% ##univariable analysis anova (lm)
+  select(post_hr) %>% 
+  map(~lm(.x ~ tvr_df$proc_type, data = tvr_df)) %>% 
+  map(broom::glance) %>% 
+  map_dfr(~ .x %>% as_tibble(), .id = "name") %>% 
+  select(name, p.value) %>% 
+  knitr::kable()
+
+tvr_df %>% 
+  select(proc_type, post_sbp, post_map, lactate_initial, lactate_peak) %>% 
+  group_by(proc_type) %>% 
+  summarize(across(post_sbp:lactate_peak, list(median = ~ median(.x, na.rm = TRUE), Q1=~quantile(.x, probs = 0.25, na.rm = TRUE), Q3=~quantile(.x, probs = 0.75, na.rm = TRUE)))) %>% 
+  pander::pandoc.table(style = "grid", caption = "Shock parameters, nonparametric")
+
+tvr_df %>% ##univariable analysis wilcox
+  select(proc_type, post_sbp, post_map, lactate_initial, lactate_peak) %>% 
+  map(~wilcox.test(.x ~ tvr_df$proc_type, data = tvr_df)) %>% 
+  map(broom::glance) %>% 
+  map_dfr(~ .x %>% as_tibble(), .id = "name") %>% 
+  select(name, p.value) %>% 
+  filter(name != "proc_type") %>% 
+  knitr::kable()
+
+tvr_df %>% 
+  filter(esrd != 1) %>% 
+  mutate(delta_creat = creat_peak - creat_initial) %>% 
+  select(proc_type, delta_creat) %>% 
+  group_by(proc_type) %>% 
+  summarize(across(delta_creat, list(median = ~ median(.x, na.rm = TRUE), Q1=~quantile(.x, probs = 0.25, na.rm = TRUE), Q3=~quantile(.x, probs = 0.75, na.rm = TRUE)))) %>% 
+  pander::pandoc.table(style = "grid", caption = "Shock parameters renal function only, nonparametric")
+
+tvr_creat=
+tvr_df %>% ##univariable analysis wilcox
+  filter(esrd != 1) %>% 
+  mutate(delta_creat = creat_peak - creat_initial) %>% 
+  select(proc_type, delta_creat)
+
+  wilcox.test(delta_creat ~ proc_type, data = tvr_creat)
+```
+
+## Univariable Modeling
+
+```{r, eval=FALSE, include=FALSE}
+tvr_df %>% ##univariable analysis
+  select(age, nyha, hfh, cirrhosis, re_op, na, creat, t_bili, inr, meld, meld_na, cvp, paps, papd, papm, fick_ci, pvr, tpg, cvp_pcwp, papi, lvef, rv_size, rv_base, rv_mid, rv_function, tapse, sprime, rv_fac, rv_dp_dt, tricuspid_regurg, tr_binary, vc_max, pasp, sprime_paps, sprime_pasp, tapse_paps, tapse_pasp, proc_type, valve_type, reg_frac, sprime_paps_c, sprime_pasp_c, tapse_paps_c, tapse_pasp_c, residual_tr, xclamp, xclamp_time) %>% 
+  #mutate(
+  #  rv_pa = ifelse(sprime_paps > 0.2391107, "High", "Low"),
+  #  rv_pa = as.factor(rv_pa)
+  #  ) %>% 
+  map(~glm(tvr_df$severe_shock ~ .x, data = tvr_df, family=binomial())) %>% 
+  map(broom::tidy) %>% 
+  map_dfr(~ .x %>% as_tibble(), .id = "name") %>% 
+  filter(term != "(Intercept)") %>% 
+  mutate(
+    OR = exp(estimate),
+    OR_CI_upper = exp(estimate + 1.96 * std.error),
+    OR_CI_lower = exp(estimate - 1.96 * std.error)
+  ) %>% 
+  select(name, OR, OR_CI_lower, OR_CI_upper, p.value) %>% 
+  knitr::kable()
+```
+
+```{r, eval=FALSE, include=FALSE}
+tvr_df %>%
+  glm(severe_shock ~ cvp, data = ., family = binomial()) %>% 
+  broom::tidy() %>% 
+    mutate(
+    OR = exp(estimate),
+    OR_CI_upper = exp(estimate + 1.96 * std.error),
+    OR_CI_lower = exp(estimate - 1.96 * std.error)
+  ) %>% 
+  select(term, OR, OR_CI_lower, OR_CI_upper, p.value) %>% 
+  knitr::kable()
+
+tvr_df %>% 
+  ggplot(aes(x=cvp)) +
+  geom_histogram() +
+  facet_grid(. ~ severe_shock)
+
+tvr_df %>% 
+  group_by(severe_shock) %>% 
+  summarize(
+    median = median(cvp, na.rm = TRUE)
+  )
+```
+
+## Multivariable Modeling
+
+```{r, eval = FALSE}
+#stepwise selection including variables with p < 0.1
+step_df =
+tvr_df %>% 
+  select(severe_shock, nyha, cvp, papd, lvef, tr_binary, proc_type, valve_type, age, papm, papi, vc_max, sprime_paps, residual_tr) %>% 
+  na.omit()
+
+step_model=
+  glm(severe_shock ~ ., data = step_df, family = binomial()) %>% 
+  MASS::stepAIC(direction = "both", trace = FALSE)
+
+summary(step_model)
+broom::tidy(step_model)
+car::vif(step_model) ##no collinearity
+```
+
+Final MV model
+
+```{r}
+mv_model =
+  glm(severe_shock ~ proc_type + cvp, data = tvr_df, family = binomial())
+
+mv_model %>% 
+  broom::glance()
+
+mv_model %>% 
+  broom::tidy()
+ 
+car::vif(mv_model) ##no collinearity
+```
+
+Interaction testing
+
+```{r}
+int_model =
+  glm(severe_shock ~ proc_type + cvp + proc_type*cvp, data = tvr_df, family = binomial())
+
+int_model %>% 
+  broom::glance()
+
+int_model %>% 
+  broom::tidy()
+```
+
+interactions -> none
+
+```{r}
+mv_model =  
+  tvr_df %>% 
+  glm(severe_shock ~ proc_type + cvp, data = ., family = binomial())
+
+mv_model %>% 
+  broom::glance()
+
+mv_model %>% 
+  broom::tidy() %>% 
+  mutate(
+    OR = exp(estimate),
+    OR_CI_upper = exp(estimate + 1.96 * std.error),
+    OR_CI_lower = exp(estimate - 1.96 * std.error)
+  ) %>% 
+  select(term, OR, OR_CI_lower, OR_CI_upper, p.value) %>% 
+  knitr::kable()
+```
+
+### Model inhosp_mortality
+```{r}
+  tvr_df %>% 
+  filter(trial != "TRILUMINATE") %>%
+  glm(inhosp_mortality ~ severe_shock + proc_type, data = ., family = binomial()) %>% 
+  broom::tidy() %>% 
+  mutate(
+    OR = exp(estimate),
+    OR_CI_upper = exp(estimate + 1.96 * std.error),
+    OR_CI_lower = exp(estimate - 1.96 * std.error)
+  ) %>% 
+  select(term, OR, OR_CI_lower, OR_CI_upper, p.value) %>% 
+  knitr::kable()
+```
+
+## Visualization
+
+```{r, warning=FALSE, message=FALSE}
+library(patchwork)
+library(ggpubr)
+library(extrafont)
+
+font_import()
+loadfonts()
+
+figure_1=
+tvr_df %>% 
+  mutate(
+    severe_shock = as.factor(severe_shock),
+    proc_type = as.factor(proc_type)
+    ) %>% 
+  ggplot(aes(x=proc_type, fill=severe_shock)) +
+  geom_bar(position=position_fill(reverse=TRUE)) +
+  scale_y_continuous(labels = scales::percent) +
+  labs(
+    title = "Shock Classification, Surgery vs. TTVI",
+    x = "Procedure Type",
+    y = "Percent"
+  ) +
+   scale_x_discrete(
+    breaks = c(0, 1), 
+    labels = c("Surgery", "TTVI")) +
+  scale_fill_discrete(name = "Shock Class", labels = c("ABC", "DE"))
+
+figure_1
+ggsave("figure_1.jpg", figure_1, width = 8, height = 5)
+
+figure_2=
+tvr_df %>% 
+  mutate(
+    severe_shock = as.factor(severe_shock),
+    proc_type = factor(proc_type, labels = c("Surgery", "TTVI")),
+    valve_type = factor(valve_type, labels = c("Repair", "Replacment"))
+    ) %>% 
+  ggplot(aes(x=valve_type, fill=severe_shock)) +
+  geom_bar(position=position_fill(reverse=TRUE)) +
+  scale_y_continuous(labels = scales::percent) +
+  facet_grid(~ proc_type) +
+  labs(
+    title = "Shock Classification, Valve Repair vs. Replacement",
+    y = "Percent",
+    x = "Valve Intervention"
+  ) +
+  scale_fill_discrete(name = "Shock Class", labels = c("ABC", "DE"))
+  
+figure_2
+ggsave("figure_2.jpg", figure_2, width = 8, height = 5)
+
+#cvp_all=
+tvr_df %>% 
+  mutate(severe_shock = as.factor(severe_shock)) %>% 
+  ggplot(aes(x=cvp, fill=severe_shock)) +
+  geom_density(alpha = .8) +
+  ylab("Density") +
+  ggthemes::theme_excel_new() +
+  theme(axis.title.y = element_text(color = "#317EC2", size=32, face="bold", family="Calibri"), axis.text = element_text(color = "#317EC2", size = 24, face = "bold", family="Calibri"), legend.position = "none") +scale_fill_manual(values = c("#317EC2", "#173862"))
+
+#cvp_facet=
+tvr_df %>% 
+  mutate(
+    severe_shock = as.factor(severe_shock),
+    proc_type = factor(proc_type, labels = c("Surgery", "TTVI"))
+    ) %>% 
+  ggplot(aes(x=cvp, fill=severe_shock)) +
+  geom_density(alpha = .8) +
+  facet_grid(. ~ proc_type) +
+  xlab("CVP") + 
+  ylab("Density") +
+  ggthemes::theme_excel_new() +
+  theme(axis.title.x = element_text(color = "#317EC2", size=32, face="bold", family="Calibri"), axis.title.y = element_text(color = "#317EC2", size=32, face="bold", family="Calibri"), axis.text = element_text(color = "#317EC2", size = 24, face = "bold", family="Calibri"), legend.position = "bottom", legend.text = element_text(color = "#317EC2", size = 24, face = "bold", family="Calibri"), strip.text.x = element_text(color = "#317EC2", size = 24, face = "bold", family="Calibri")) +
+  scale_fill_manual(values = c("#317EC2", "#173862"), labels = c("Shock ABC", "Shock DE"))
+
+##OR
+
+tvr_df %>% 
+  group_by(severe_shock) %>% 
+  summarize(median_cvp = median(cvp, na.rm = TRUE))
+
+tvr_df %>% 
+  group_by(severe_shock, proc_type) %>% 
+  summarize(median_cvp = median(cvp, na.rm = TRUE))
+
+cvp_all=
+tvr_df %>% 
+  mutate(severe_shock = as.factor(severe_shock)) %>%
+  group_by(severe_shock) %>% 
+  mutate(
+    median_cvp = median(cvp, na.rm = TRUE),
+    density_cvp = which.max(density(cvp, na.rm = TRUE)$y)
+    ) %>% 
+  ggdensity(x="cvp", fill="severe_shock", alpha = 0.8) +
+  geom_vline(aes(xintercept=median_cvp)) +
+  ylab("Density") +
+  ggthemes::theme_excel_new() +
+  theme(axis.title.y = element_text(color = "#317EC2", size=32, face="bold", family="Calibri"), axis.text = element_text(color = "#317EC2", size = 24, face = "bold", family="Calibri"), legend.position = "none") +scale_fill_manual(values = c("#317EC2", "#173862")) +
+  geom_label(aes(label=median_cvp, y=log10(density_cvp)/40, x=median_cvp), color = "red", size=5, face="bold", family="Calibri")
+
+#  theme(axis.title.y = element_text(color = "black", size=24, face="bold"), axis.text = element_text(color = "black", size = 18, face = "bold"), legend.position = "none") +
+ # scale_fill_manual(values = c("grey", "black")) +
+
+cvp_facet=
+tvr_df %>% 
+  mutate(
+    severe_shock = as.factor(severe_shock),
+    proc_type = factor(proc_type, labels = c("Surgery", "TTVI"))
+    ) %>% 
+  group_by(severe_shock, proc_type) %>% 
+  mutate(
+    median_cvp = median(cvp, na.rm = TRUE),
+    density_cvp = which.max(density(cvp, na.rm = TRUE)$y)
+    ) %>% 
+  ggdensity(x="cvp", fill="severe_shock", alpha = 0.8) +
+  facet_grid(. ~ proc_type) +
+  geom_vline(aes(xintercept=median_cvp)) +
+  xlab("CVP") + 
+  ylab("Density") +
+  ggthemes::theme_excel_new() +
+  theme(axis.title.x = element_text(color = "#317EC2", size=32, face="bold", family="Calibri"), axis.title.y = element_text(color = "#317EC2", size=32, face="bold", family="Calibri"), axis.text = element_text(color = "#317EC2", size = 24, face = "bold", family="Calibri"), legend.position = "bottom", legend.text = element_text(color = "#317EC2", size = 24, face = "bold", family="Calibri"), strip.text.x = element_text(color = "#317EC2", size = 24, face = "bold", family="Calibri")) +
+  scale_fill_manual(values = c("#317EC2", "#173862"), labels = c("Shock ABC", "Shock DE")) +
+  geom_label(aes(label=median_cvp, y=log10(density_cvp)/35, x=median_cvp), color = "red", size=5, face="bold", family="Calibri")
+
+#theme(axis.title.x = element_text(color = "black", size=24, face="bold"), axis.title.y = element_text(color = "black", size=24, face="bold"), axis.text = element_text(color = "black", size = 18, face = "bold"), legend.position = "bottom", legend.text = element_text(color = "black", size = 18, face = "bold"), strip.text.x = element_text(color = "black", size = 18, face = "bold")) +
+ # scale_fill_manual(values = c("grey", "black"), labels = c("Shock ABC", "Shock DE"))
+
+figure_4 = cvp_all / cvp_facet
+figure_4
+ggsave("figure_4_ehj.jpg", figure_4, width = 8, height = 5)
+```
+
+## Summaries for Figures 1 & 2
+
+```{r}
+tvr_df %>% #surgery_ttvi
+  mutate(
+    severe_shock = as.factor(severe_shock),
+    proc_type = as.factor(proc_type)
+  ) %>% 
+  group_by(proc_type, severe_shock) %>% 
+  summarise (n = n()) %>%
+  mutate(freq = n / sum(n)) %>% 
+  knitr::kable()
+
+tvr_df %>% #ttvi
+  mutate(
+    severe_shock = as.factor(severe_shock),
+    proc_type = factor(proc_type),
+    valve_type = factor(valve_type)
+    ) %>% 
+  filter(proc_type == 1) %>% 
+  group_by(valve_type, severe_shock) %>% 
+  summarise (n = n()) %>%
+  mutate(freq = n / sum(n)) %>% 
+  knitr::kable()
+
+tvr_df %>% #surgery
+  mutate(
+    severe_shock = as.factor(severe_shock),
+    proc_type = factor(proc_type),
+    valve_type = factor(valve_type)
+    ) %>% 
+  filter(proc_type == 0) %>% 
+  group_by(valve_type, severe_shock) %>% 
+  summarise (n = n()) %>%
+  mutate(freq = n / sum(n)) %>% 
+  knitr::kable()
+
+tvr_df %>% #sprime_paps_cat
+  mutate(
+    severe_shock = as.factor(severe_shock),
+    sprime_paps_cat = case_when(sprime >= 9.5 & paps < 40 ~ "S' >=9.5, PAPs <40", sprime >= 9.5 & paps >= 40 ~ "S' >= 9.5, PAPs >= 40", sprime < 9.5 & paps < 40 ~ "S'< 9.5, PAPs <40", sprime < 9.5 & paps >=40 ~ "S' < 9.5, PAPs >= 40", TRUE ~ "Missing")
+  ) %>% 
+  filter(sprime_paps_cat != "Missing") %>% 
+  mutate(
+    sprime_paps_cat = fct_relevel(sprime_paps_cat, c("S' >=9.5, PAPs <40", "S' >= 9.5, PAPs >= 40", "S'< 9.5, PAPs <40", "S' < 9.5, PAPs >= 40"))
+  ) %>%
+  group_by(sprime_paps_cat, severe_shock) %>% 
+  summarise (n = n()) %>%
+  mutate(freq = n / sum(n)) %>% 
+  knitr::kable()
+
+tvr_df %>%  
+    mutate(
+    severe_shock = as.factor(severe_shock),
+    sprime_paps_cat = case_when(sprime >= 9.5 & paps < 40 ~ "S' >=9.5, PAPs <40", sprime >= 9.5 & paps >= 40 ~ "S' >= 9.5, PAPs >= 40", sprime < 9.5 & paps < 40 ~ "S'< 9.5, PAPs <40", sprime < 9.5 & paps >=40 ~ "S' < 9.5, PAPs >= 40", TRUE ~ "Missing")
+  ) %>% 
+  filter(sprime_paps_cat != "Missing") %>% 
+  mutate(
+    sprime_paps_cat = fct_relevel(sprime_paps_cat, c("S' >=9.5, PAPs <40", "S' >= 9.5, PAPs >= 40", "S'< 9.5, PAPs <40", "S' < 9.5, PAPs >= 40"))
+  ) %>%
+  summarise(pval = fisher.test(severe_shock, sprime_paps_cat)$p.value) %>% 
+  knitr::kable()
+
+tvr_df %>% #sprime_paps_cat
+  mutate(
+    severe_shock = as.factor(severe_shock),
+    sprime_paps_cat = case_when(sprime >= 9.5 & paps < 40 ~ "normal", sprime < 9.5 
+    | paps >= 40 ~ "abnormal", TRUE ~ "Missing")
+  ) %>% 
+  filter(sprime_paps_cat != "Missing") %>% 
+  mutate(
+    sprime_paps_cat = fct_relevel(sprime_paps_cat, c("normal", "abnormal"))
+  ) %>%
+  group_by(sprime_paps_cat, severe_shock) %>% 
+  summarise (n = n()) %>%
+  mutate(freq = n / sum(n)) %>% 
+  knitr::kable()
+
+tvr_df %>% #sprime_paps_cat
+  mutate(
+    severe_shock = as.factor(severe_shock),
+    sprime_paps_cat = case_when(sprime >= 9.5 & paps < 40 ~ "normal", sprime < 9.5 
+    | paps >= 40 ~ "abnormal", TRUE ~ "Missing")
+  ) %>% 
+  filter(sprime_paps_cat != "Missing") %>% 
+  mutate(
+    sprime_paps_cat = fct_relevel(sprime_paps_cat, c("normal", "abnormal"))
+  ) %>%
+  summarise(pval = fisher.test(severe_shock, sprime_paps_cat)$p.value) %>% 
+  knitr::kable()
+
+tvr_df %>% 
+  mutate(
+    rv_pa = ifelse(sprime_paps > 0.2391107, "High", "Low"),
+    rv_pa = as.factor(rv_pa)
+  ) %>% 
+  filter(rv_pa != "NA") %>% 
+  summarise(pval = chisq.test(severe_shock, rv_pa)$p.value) %>% 
+  knitr::kable()
+```
+ 
+Exploratory plots
+```{r}
+tvr_df %>% 
+  mutate(
+    severe_shock = as.factor(severe_shock), 
+    tr_binary = if_else(tricuspid_regurg > 4, 1, 0, 0),
+    tr_binary = as.factor(tr_binary)
+  ) %>% 
+  ggplot(aes(y = sprime_paps, x = cvp, color = severe_shock)) +
+  geom_point()
+
+tvr_df %>% 
+  mutate(
+    severe_shock = as.factor(severe_shock), 
+    tr_binary = if_else(tricuspid_regurg > 4, 1, 0, 0),
+    tr_binary = as.factor(tr_binary)
+  ) %>% 
+  ggplot(aes(y = sprime_paps, x = cvp, color = tr_binary)) +
+  geom_point() +
+  facet_wrap(.~severe_shock)
+  
+tvr_df %>% 
+  mutate(
+    severe_shock = as.factor(severe_shock),
+    tr_binary = if_else(tricuspid_regurg > 4, 1, 0, 0),
+    tr_binary = as.factor(tr_binary)
+  ) %>% 
+  ggplot(aes(y = tapse, x = severe_shock)) +
+  geom_boxplot() +
+  facet_grid(. ~ tr_binary)
+
+tvr_df %>% 
+  mutate(
+    tr_binary = if_else(tricuspid_regurg > 4, 1, 0, 0),
+    tr_binary = as.factor(tr_binary),
+    rv_function = if_else(rv_function >=3, 1, 0, 0),
+    rv_function = as.factor(rv_function)
+  ) %>% 
+  group_by(rv_function) %>% 
+  mutate(
+    median_cvp = median(cvp, na.rm = TRUE)
+  ) %>% 
+  ggplot(aes(x = rv_function, y = median_cvp)) +
+  geom_boxplot() +
+  facet_grid(. ~ rv_function)
+
+sprime_paps_boxplot =
+  tvr_df %>% 
+  mutate(
+    severe_shock = as.factor(severe_shock)
+  ) %>%
+  ggplot(aes(y = sprime_paps, x = severe_shock, fill=severe_shock)) +
+  geom_boxplot()
+
+ggsave("sprime_paps_boxplot.jpg", sprime_paps_boxplot, width = 8, height = 5)
+
+sprime_paps_density =   
+  tvr_df %>% 
+  mutate(severe_shock = as.factor(severe_shock)) %>% 
+  ggplot(aes(x=sprime_paps, fill=severe_shock)) +
+  geom_density(alpha = .8) +
+  ylab("Density") +
+  ggthemes::theme_excel_new() +
+  theme(axis.title.y = element_text(color = "black", size=24, face="bold"), axis.text = element_text(color = "black", size = 18, face = "bold"), legend.position = "none") +
+  scale_fill_manual(values = c("grey", "black"))
+
+sprime_paps_density_facet =
+tvr_df %>% 
+  mutate(
+    severe_shock = as.factor(severe_shock),
+    proc_type = factor(proc_type, labels = c("Surgery", "TTVI"))
+    ) %>% 
+  ggplot(aes(x=sprime_paps, fill=severe_shock)) +
+  geom_density(alpha = .8) +
+  facet_grid(. ~ proc_type) +
+  xlab("S'/PAPs") + 
+  ylab("Density") +
+  ggthemes::theme_excel_new() +
+  theme(axis.title.x = element_text(color = "black", size=24, face="bold"), axis.title.y = element_text(color = "black", size=24, face="bold"), axis.text = element_text(color = "black", size = 18, face = "bold"), legend.position = "bottom", legend.text = element_text(color = "black", size = 18, face = "bold"), strip.text.x = element_text(color = "black", size = 18, face = "bold")) +
+  scale_fill_manual(values = c("grey", "black"), labels = c("Shock ABC", "Shock DE"))
+
+##figure 6
+sprime_paps_scatter=
+tvr_df %>% 
+  mutate(
+   Shock = factor(severe_shock)
+  ) %>% 
+  ggplot(aes(x=paps, y=sprime, color=Shock)) +
+  geom_point() +
+  geom_hline(yintercept=9.5) +
+  geom_vline(xintercept=40) +
+  xlab("PAPs, mmHg") + 
+  ylab("S', cm/s") +
+  ggthemes::theme_excel_new() +
+  scale_x_continuous(breaks = c(0, 40, 75), limits = c(0,75), minor_breaks = c(20, 60)) +
+  scale_y_continuous(breaks = c(0, 9.5, 19), limits = c(0,19)) +
+  theme(axis.title.x = element_text(color = "black", size=24, face="bold"), axis.title.y = element_text(color = "black", size=24, face="bold"), axis.text = element_text(color = "black", size = 18, face = "bold"), legend.position = "bottom", legend.text = element_text(color = "black", size = 18, face = "bold")) +
+  scale_color_manual(name = "", values = c("grey", "black"), labels = c("Shock ABC", "Shock DE"))
+
+ggsave("sprime_paps_scatter.pdf", sprime_paps_scatter, width = 8, height = 5)
+
+tvr_df %>% 
+  mutate(
+    severe_shock = as.factor(severe_shock),
+    sprime_paps_cat = case_when(sprime >= 9.5 & paps < 40 ~ "S' >=9.5, PAPs <40", sprime >= 9.5 & paps >= 40 ~ "S' >= 9.5, PAPs >= 40", sprime < 9.5 & paps < 40 ~ "S'< 9.5, PAPs <40", sprime < 9.5 & paps >=40 ~ "S' < 9.5, PAPs >= 40", TRUE ~ "Missing")
+  ) %>% 
+  filter(sprime_paps_cat != "Missing") %>% 
+  mutate(
+    sprime_paps_cat = fct_relevel(sprime_paps_cat, c("S' >=9.5, PAPs <40", "S' >= 9.5, PAPs >= 40", "S'< 9.5, PAPs <40", "S' < 9.5, PAPs >= 40"))
+  ) %>% 
+  ggplot(aes(x=sprime_paps_cat, fill=severe_shock)) +
+  geom_bar(position="dodge") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(
+    title = "",
+    x = "",
+    y = "Count"
+  ) +
+  scale_fill_discrete(name = "Shock Class", labels = c("A/B/C", "D/E"))
+
+```
+
+##Date plots
+
+```{r}
+date_df =
+tvr_df %>% 
+  mutate(
+    severe_shock= as_factor(severe_shock)
+  ) %>% 
+  group_by(proc_type, severe_shock, year) %>%
+  summarize(n = n())
+
+tvr_df %>%  #testing differences across year
+  group_by(year, severe_shock) %>% 
+  summarise (n = n()) %>%
+  mutate(freq = n / sum(n)) %>% 
+  knitr::kable()
+
+tvr_df %>%  
+  filter(proc_type==0) %>% 
+  summarise(pval = fisher.test(year, severe_shock)$p.value) %>% 
+  knitr::kable()
+
+tvr_df %>%  
+  filter(proc_type==1) %>% 
+  summarise(pval = fisher.test(year, severe_shock)$p.value) %>% 
+  knitr::kable()
+
+date_fig = 
+date_df %>% 
+  ggplot(aes(x=year,y=n, fill=severe_shock)) +
+  geom_col(position="dodge2") +
+  facet_grid(. ~ proc_type) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  scale_fill_manual(name = "", values = c("grey", "black"), labels = c("Shock ABC", "Shock DE"))
+  
+date_fig
+
+```
+
+
+Bootstrap
+```{r, eval=FALSE, include=FALSE, bootstrap}
+tvr_bootstrap = 
+  tvr_df %>% 
+  modelr::bootstrap(n = 1000) %>% 
+  mutate(
+    models = map(strap, ~glm(severe_shock ~ proc_type + valve_type + tr_binary + lvef + lved + cvp + papd + pcwp + nyha, data = .x, family = binomial())),
+    results = map(models, broom::tidy)) %>% 
+  select(-strap, -models) %>% 
+  unnest(results) %>%
+  mutate(
+    OR = exp(estimate)
+    )%>% 
+  select(term, OR) %>% 
+  filter(term != "(Intercept)")
+
+tvr_bootstrap %>% ##median OR, upper and lower confidence intervals
+  group_by(term) %>% 
+  summarize(
+    median_OR = median(OR),
+    ci_lower = quantile(OR, 0.025),
+    ci_upper = quantile(OR, 0.975)
+  ) %>% 
+  knitr::kable()
+
+tvr_bootstrap %>% ##check distribution
+  ggplot(aes(x = OR)) + 
+  geom_density() +
+  facet_grid(. ~ term)
+```
